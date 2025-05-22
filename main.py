@@ -118,7 +118,7 @@ class KeywordSchema(BaseModel):
     keywordName: str
 
 class PlaceSchema(BaseModel):
-    placeID: int
+    placeID: Optional[int]=None
     placeName: str
     address: str
 
