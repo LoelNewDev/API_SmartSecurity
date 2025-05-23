@@ -114,7 +114,7 @@ class EmailCreate(BaseModel):
     passengerID: int
 
 class KeywordSchema(BaseModel):
-    keywordID: int
+    keywordID: Optional[int]=None
     keywordName: str
 
 class PlaceSchema(BaseModel):
