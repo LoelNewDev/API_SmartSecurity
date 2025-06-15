@@ -1,26 +1,29 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, TIMESTAMP, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, BigInteger
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
-from sqlalchemy import BigInteger
 from typing import Optional
+import whisper
+import os
+import uuid
 
-# Configuración de la base de datos
+# ============================
+# CONFIGURACIÓN GENERAL
+# ============================
+
 #DATABASE_URL = "postgresql://postgres:keni9614@localhost:5432/db_smartsecurity"
-DATABASE_URL = "postgresql://postgres:pApyzphFIKARRMuBVYsVqoorLspbgqRc@shortline.proxy.rlwy.net:55430/railway"
-
+DATABASE_URL = "postgresql://postgres:onNAoMEopgjdtAWhnVrmCeLlMptjGCqC@shuttle.proxy.rlwy.net:43549/railway"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
 app = FastAPI()
 
-# 🔐 Habilitar CORS (antes de las rutas)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cambia por ["http://localhost:3000"] si tu frontend está en otro puerto o dominio
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,55 +35,61 @@ app.add_middleware(
 
 class Passenger(Base):
     __tablename__ = "passenger"
-    passengerID = Column("passengerID",Integer, primary_key=True, index=True, autoincrement=True)
-    passengerFirstName = Column("passengerfirstName",String(100))
-    passengerLastName = Column("passengerlastname",String(100))
-    passengerEmail = Column("passengeremail",String(150))
-    passengerDocumentID = Column("passengerdocumentID",Integer)
-    passengerDocumentType = Column("passengerdocumentType",Integer)
-    passengerCellPhone = Column("passengercellPhone",Integer)
-    passengerCodeCellPhone = Column("passengercodecellPhone",Integer)
-    passengerPassword = Column("passengerpassword",String(255))
+    passengerID = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    passengerfirstName = Column(String(100))
+    passengerlastname = Column(String(100))
+    passengeremail = Column(String(150), unique=True)
+    passengerdocumentID = Column(Integer)
+    passengerdocumentType = Column(String(50))
+    passengercellPhone = Column(Integer)
+    passengercodecellPhone = Column(Integer)
+    passengerpassword = Column(String(255))
     isActive = Column(Boolean, default=True)
     lastLogin = Column(TIMESTAMP, default=datetime.utcnow)
+    drives = Column(Boolean, default=False)
+    licenseCategory = Column(String(50), default='')
+    licenseNumber = Column(String(50), default='')
+    hasCar = Column(Boolean, default=False)
+    licensePlate = Column(String(50), default='')
 
 class Driver(Base):
     __tablename__ = "driver"
-    passengerID = Column("passengerID",Integer, ForeignKey("passenger.passengerID"), primary_key=True)
-    drives = Column("drives",Boolean, nullable=False)
-    licenseCategory = Column("licenseCategory",String(50))
-    licenseNumber = Column("licenseNumber",String(50))
-    hasCar = Column("hasCar",Boolean, nullable=False)
-    licensePlate = Column("licensePlate",String(50))
+    passengerID = Column(Integer, ForeignKey("passenger.passengerID"), primary_key=True)
+    drives = Column(Boolean, nullable=False)
+    licenseCategory = Column(String(50))
+    licenseNumber = Column(String(50))
+    hasCar = Column(Boolean, nullable=False)
+    licensePlate = Column(String(50))
+
     passenger = relationship("Passenger", backref="driver")
 
 class Email(Base):
     __tablename__ = "email"
-    emailID = Column("emailID",BigInteger, primary_key=True, autoincrement=True)
-    subjectEmail = Column("subjectEmail",String(150))
-    descriptionEmail = Column("descriptionEmail",String)
-    passengerID = Column("passengerID",Integer, ForeignKey("passenger.passengerID"))
-    isActive = Column("isActive",Boolean, default=True)
-    lastLogin = Column("lastLogin",TIMESTAMP, default=datetime.utcnow)
+    emailID = Column(BigInteger, primary_key=True, autoincrement=True)
+    subjectEmail = Column(String(150))
+    descriptionEmail = Column(String)
+    passengerID = Column(Integer, ForeignKey("passenger.passengerID"))
+    isActive = Column(Boolean, default=True)
+    lastLogin = Column(TIMESTAMP, default=datetime.utcnow)
 
 class Keyword(Base):
     __tablename__ = "keyword"
-    keywordID = Column("keywordID",Integer, primary_key=True, autoincrement=True)
-    keywordName = Column("keywordName",String(100))
+    keywordID = Column(Integer, primary_key=True, autoincrement=True)
+    keywordName = Column(String(100))
 
 class Place(Base):
     __tablename__ = "place"
-    placeID = Column("placeID",Integer, primary_key=True, autoincrement=True)
-    placeName = Column("placeName",String(100))
-    address = Column("address",String(200))
+    placeID = Column(Integer, primary_key=True, autoincrement=True)
+    placeName = Column(String(100))
+    address = Column(String(200))
 
 class TrustedContact(Base):
     __tablename__ = "trustedcontact"
-    trustedContactID = Column("trustedcontactid",BigInteger, primary_key=True, autoincrement=True)
-    trustedContactFullName = Column("trustedcontactfullname",String(100))
-    trustedContactCodeCellPhone = Column("trustedcontactcodecellphone",Integer)
-    trustedContactCellPhone = Column("trustedcontactcellphone",Integer)
-    trustedContactEmail = Column("trustedcontactemail",String(150))
+    trustedContactID = Column(BigInteger, primary_key=True, autoincrement=True)
+    trustedContactFullName = Column(String(100))
+    trustedContactCodeCellPhone = Column(Integer)
+    trustedContactCellPhone = Column(Integer)
+    trustedContactEmail = Column(String(150))
 
 Base.metadata.create_all(bind=engine)
 
@@ -88,16 +97,24 @@ Base.metadata.create_all(bind=engine)
 # MODELOS Pydantic (Frontend)
 # ==========================
 
+from typing import Optional
+
 class PassengerBase(BaseModel):
-    passengerID: int
-    passengerFirstName: str
-    passengerLastName: str
-    passengerEmail: str
-    passengerDocumentID: int
-    passengerDocumentType: int
-    passengerCellPhone: int
-    passengerCodeCellPhone: int
-    passengerPassword: str
+    passengerID: Optional[int] = None
+    passengerfirstName: str
+    passengerlastname: str
+    passengeremail: str
+    passengerdocumentID: int
+    passengerdocumentType: Optional[str] = ''
+    passengercellPhone: int
+    passengercodecellPhone: int
+    passengerpassword: str
+    isActive: Optional[bool] = True
+    drives: Optional[bool] = False
+    licenseCategory: Optional[str] = ''
+    licenseNumber: Optional[str] = ''
+    hasCar: Optional[bool] = False
+    licensePlate: Optional[str] = ''
 
 class DriverCreate(BaseModel):
     passenger: PassengerBase
@@ -108,7 +125,7 @@ class DriverCreate(BaseModel):
     licensePlate: str
 
 class EmailCreate(BaseModel):
-    emailID: Optional[int]=None
+    emailID: int
     subjectEmail: str
     descriptionEmail: str
     passengerID: int
@@ -118,7 +135,7 @@ class KeywordSchema(BaseModel):
     keywordName: str
 
 class PlaceSchema(BaseModel):
-    placeID: Optional[int]=None
+    placeID: Optional[int]=None 
     placeName: str
     address: str
 
@@ -129,6 +146,10 @@ class TrustedContactSchema(BaseModel):
     trustedContactCellPhone: int
     trustedContactEmail: str
 
+class LoginInput(BaseModel):
+    email: str
+    password: str
+
 # ============================  
 # RUTAS PASSENGER
 # ============================
@@ -137,9 +158,6 @@ class TrustedContactSchema(BaseModel):
 def crear_passenger(passenger: PassengerBase):
     db = SessionLocal()
     try:
-        existente = db.query(Passenger).filter(Passenger.passengerID == passenger.passengerID).first()
-        if existente:
-            raise HTTPException(status_code=400, detail="Passenger already exists")
         nuevo = Passenger(**passenger.dict())
         db.add(nuevo)
         db.commit()
@@ -159,7 +177,8 @@ def actualizar_passenger(passenger_id: int, data: PassengerBase):
             raise HTTPException(status_code=404, detail="Passenger not found")
 
         for attr, value in data.dict().items():
-            setattr(pasajero, attr, value)
+            if attr != "passengerID":
+                setattr(pasajero, attr, value)
 
         db.commit()
         return {"message": "Passenger updated successfully"}
@@ -176,12 +195,37 @@ def eliminar_passenger(passenger_id: int):
         pasajero = db.query(Passenger).filter(Passenger.passengerID == passenger_id).first()
         if not pasajero:
             raise HTTPException(status_code=404, detail="Passenger not found")
+
+        # 🧹 Borrar contactos de confianza por teléfono del pasajero
+        db.query(TrustedContact).filter(
+            TrustedContact.trustedContactCellPhone == pasajero.passengercellPhone
+        ).delete()
+
+        # 🧹 Borrar ubicaciones si tienen una relación (si Place tiene un passengerID, por ejemplo)
+        db.query(Place).filter(Place.passengerID == passenger_id).delete()
+
+        # 🗑️ Borrar pasajero
         db.delete(pasajero)
         db.commit()
-        return {"message": "Passenger deleted successfully"}
+
+        return {"message": "Passenger and related data deleted successfully"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    finally:
+        db.close()
+
+@app.get("/passenger/search")
+def buscar_passenger_por_email_y_password(email: str, password: str):
+    db = SessionLocal()
+    try:
+        pasajero = db.query(Passenger).filter(
+            Passenger.passengeremail == email,
+            Passenger.passengerpassword == password
+        ).first()
+        if pasajero:
+            return pasajero.__dict__
+        raise HTTPException(status_code=404, detail="Passenger not found")
     finally:
         db.close()
 
@@ -193,28 +237,19 @@ def eliminar_passenger(passenger_id: int):
 def crear_driver(driver_data: DriverCreate):
     db = SessionLocal()
     try:
-        # Verifica si ya existe el passenger
-        existing = db.query(Passenger).filter(Passenger.passengerID == driver_data.passenger.passengerID).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Passenger already exists")
+        # Usar el passenger ya existente
+        passenger = db.query(Passenger).filter(Passenger.passengerID == driver_data.passenger.passengerID).first()
+        if not passenger:
+            raise HTTPException(status_code=404, detail="Passenger not found")
 
-        # Crear Passenger
-        passenger = Passenger(
-            passengerID=driver_data.passenger.passengerID,
-            passengerFirstName=driver_data.passenger.passengerFirstName,
-            passengerLastName=driver_data.passenger.passengerLastName,
-            passengerEmail=driver_data.passenger.passengerEmail,
-            passengerDocumentID=driver_data.passenger.passengerDocumentID,
-            passengerDocumentType=driver_data.passenger.passengerDocumentType,
-            passengerCellPhone=driver_data.passenger.passengerCellPhone,
-            passengerCodeCellPhone=driver_data.passenger.passengerCodeCellPhone,
-            passengerPassword=driver_data.passenger.passengerPassword
-        )
-        db.add(passenger)
+        # Verificar si el driver ya existe
+        existing_driver = db.query(Driver).filter(Driver.passengerID == driver_data.passenger.passengerID).first()
+        if existing_driver:
+            raise HTTPException(status_code=400, detail="Driver already exists")
 
-        # Crear Driver
+        # Crear Driver únicamente
         driver = Driver(
-            passengerID=driver_data.passenger.passengerID,
+            passengerID=passenger.passengerID,
             drives=driver_data.drives,
             licenseCategory=driver_data.licenseCategory,
             licenseNumber=driver_data.licenseNumber,
@@ -269,19 +304,41 @@ def actualizar_driver(driver_id: int, driver_data: DriverCreate):
 def eliminar_driver(driver_id: int):
     db = SessionLocal()
     try:
+        # Verificar existencia
         driver = db.query(Driver).filter(Driver.passengerID == driver_id).first()
         passenger = db.query(Passenger).filter(Passenger.passengerID == driver_id).first()
 
-        if not driver or not passenger:
+        if not driver:
             raise HTTPException(status_code=404, detail="Driver not found")
+        if not passenger:
+            raise HTTPException(status_code=404, detail="Passenger not found")
 
+        # Eliminar emails asociados al pasajero (si existen)
+        db.query(Email).filter(Email.passengerID == passenger.passengerID).delete()
+
+        # Eliminar contactos de confianza (si aplican)
+        db.query(TrustedContact).filter(TrustedContact.trustedContactCellPhone == passenger.passengercellPhone).delete()
+
+        # Eliminar driver y luego passenger
         db.delete(driver)
         db.delete(passenger)
         db.commit()
+
         return {"message": "Driver deleted successfully"}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al eliminar driver: {str(e)}")
+    finally:
+        db.close()
+
+@app.get("/driver/{driver_id}")
+def obtener_driver(driver_id: int):
+    db = SessionLocal()
+    try:
+        driver = db.query(Driver).filter(Driver.passengerID == driver_id).first()
+        if not driver:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        return {"message": "Driver exists"}
     finally:
         db.close()
 
@@ -364,7 +421,10 @@ def actualizar_keyword(keyword_id: int, keyword: KeywordSchema):
 def crear_place(place: PlaceSchema):
     db = SessionLocal()
     try:
-        nuevo = Place(**place.dict())
+        nuevo = Place(
+            placeName=place.placeName,
+            address=place.address
+        )
         db.add(nuevo)
         db.commit()
         return {"message": "Place created"}
@@ -451,3 +511,71 @@ def buscar_contacto(query: str):
         return results
     finally:
         db.close()
+
+# ============================  
+# RUTAS LOGIN
+# ============================
+
+@app.post("/login/")
+def login_passenger(data: LoginInput):
+    db = SessionLocal()
+    try:
+        passenger = db.query(Passenger).filter(
+            Passenger.passengeremail == data.email,
+            Passenger.passengerpassword == data.password
+        ).first()
+
+        if not passenger:
+            raise HTTPException(status_code=404, detail="Invalid email or password")
+
+        return {
+            "passengerID": passenger.passengerID,
+            "passengerfirstName": passenger.passengerfirstName,  # minúscula f
+            "passengerlastname": passenger.passengerlastname,
+            "passengeremail": passenger.passengeremail,
+            "passengerdocumentID": passenger.passengerdocumentID,
+            "passengerdocumentType": passenger.passengerdocumentType,
+            "passengercellPhone": passenger.passengercellPhone,
+            "passengercodecellPhone": passenger.passengercodecellPhone,
+            "passengerpassword": passenger.passengerpassword,
+            "isActive": passenger.isActive,
+            "lastLogin": passenger.lastLogin
+        }
+    finally:
+        db.close()
+
+# ============================
+# TRANSCRIPCIÓN CON WHISPER
+# ============================
+
+model = whisper.load_model("base")  # Puedes cambiar a tiny, small, etc.
+
+@app.post("/transcribe/")
+async def transcribe_audio(file: UploadFile = File(...)):
+    temp_filename = f"temp_{uuid.uuid4()}.wav"
+    with open(temp_filename, "wb") as buffer:
+        buffer.write(await file.read())
+
+    try:
+        result = model.transcribe(
+            temp_filename,
+            language="es",
+            verbose=False,
+            temperature=0.0
+        )
+        print("🔊 TRANSCRIPCIÓN:", result["text"])  # ✅ AGREGA ESTO
+        return {"text": result["text"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al transcribir: {str(e)}")
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+# ============================
+# INICIO DEL SERVIDOR
+# ============================
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
