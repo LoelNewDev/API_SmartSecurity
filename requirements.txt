@@ -6,3 +6,6 @@ python-multipart
 pydantic
 python-dotenv
 passlib
+openai-whisper
+ffmpeg-python
+torch
