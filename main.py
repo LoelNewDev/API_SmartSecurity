@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, BigInteger
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, BigInteger, Float, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 from typing import Optional
@@ -18,6 +18,8 @@ DATABASE_URL = "postgresql://postgres:onNAoMEopgjdtAWhnVrmCeLlMptjGCqC@shuttle.p
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
+
+db = SessionLocal()  # ✅ Se define para rutas externas
 
 app = FastAPI()
 
@@ -60,7 +62,6 @@ class Driver(Base):
     licenseNumber = Column(String(50))
     hasCar = Column(Boolean, nullable=False)
     licensePlate = Column(String(50))
-
     passenger = relationship("Passenger", backref="driver")
 
 class Email(Base):
@@ -90,6 +91,13 @@ class TrustedContact(Base):
     trustedContactCodeCellPhone = Column(Integer)
     trustedContactCellPhone = Column(Integer)
     trustedContactEmail = Column(String(150))
+
+class LocationTrack(Base):
+    __tablename__ = 'location_track'
+    passenger_id = Column(Integer, primary_key=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
 
@@ -149,6 +157,11 @@ class TrustedContactSchema(BaseModel):
 class LoginInput(BaseModel):
     email: str
     password: str
+
+class LocationUpdate(BaseModel):
+    passenger_id: int
+    latitude: float
+    longitude: float
 
 # ============================  
 # RUTAS PASSENGER
@@ -570,6 +583,33 @@ async def transcribe_audio(file: UploadFile = File(...)):
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
+
+# ============================
+# CAMINATA CON GPS
+# ============================
+
+@app.post("/location/update")
+def update_location(data: LocationUpdate):
+    try:
+        location = db.query(LocationTrack).filter_by(passenger_id=data.passenger_id).first()
+        if location:
+            location.latitude = data.latitude
+            location.longitude = data.longitude
+        else:
+            location = LocationTrack(**data.dict())
+            db.add(location)
+        db.commit()
+        return {"status": "updated"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating location: {str(e)}")
+
+@app.get("/location/{passenger_id}")
+def get_location(passenger_id: int):
+    location = db.query(LocationTrack).filter_by(passenger_id=passenger_id).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"lat": location.latitude, "lng": location.longitude, "updated": location.updated_at}
 
 # ============================
 # INICIO DEL SERVIDOR
